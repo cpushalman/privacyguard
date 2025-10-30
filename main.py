@@ -17,7 +17,7 @@ app = Flask(__name__)
 CORS(app)
 
 # Database setup
-DB_PATH = 'privacyguard/db.sqlite'
+DB_PATH = 'db.sqlite'
 
 def init_db():
     """Initialize SQLite database with required tables"""

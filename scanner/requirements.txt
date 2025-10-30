@@ -1,0 +1,38 @@
+# Privacy Guard Backend Requirements
+
+# Core Framework
+flask==3.0.0
+flask-cors==4.0.0
+
+# Network Scanning
+scapy==2.5.0
+pyshark==0.6
+
+# System Integration
+psutil==5.9.6
+netifaces==0.11.0
+
+# Data Processing
+python-dotenv==1.0.0
+
+# Database (using SQLite - built-in)
+# No additional package needed
+
+# Optional: Advanced Features
+# cryptography==41.0.7  # For certificate validation
+# requests==2.31.0      # For HTTP checks
+
+# Development Tools (optional)
+pytest==7.4.3
+pytest-cov==4.1.0
+black==23.12.1
+flake8==6.1.0
+
+# Platform-specific
+# Linux: Install these system packages
+#   - apt: iw wireless-tools net-tools
+#   - pacman: iw wireless_tools net-tools
+#   - dnf: iw wireless-tools net-tools
+
+# macOS: No additional packages needed
+# Windows: WinPcap or Npcap required for Scapy

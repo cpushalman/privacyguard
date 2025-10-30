@@ -25,10 +25,10 @@ def safe_parse_json(response: requests.Response) -> Optional[Dict[str, Any]]:
     except Exception:
         text = getattr(response, "text", "") or ""
         if not text.strip():
-            print(f"{Fore.YELLOW}⚠ Warning: API returned empty body (HTTP {getattr(response, 'status_code', 'N/A')}){Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}Warning: API returned empty body (HTTP {getattr(response, 'status_code', 'N/A')}){Style.RESET_ALL}")
         else:
             snippet = text[:200].replace("\n", " ")
-            print(f"{Fore.RED}✗ Warning: API returned non-JSON response (HTTP {getattr(response, 'status_code', 'N/A')}): {snippet}{Style.RESET_ALL}")
+            print(f"{Fore.RED}Warning: API returned non-JSON response (HTTP {getattr(response, 'status_code', 'N/A')}): {snippet}{Style.RESET_ALL}")
         return None
 
 
@@ -63,12 +63,12 @@ def check_api_health() -> bool:
     try:
         response = requests.get(f"{API_BASE}/health", timeout=REQUEST_TIMEOUT)
         if response.status_code == 200:
-            print(f"{Fore.GREEN}✓ API Server is running{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}Check: API Server is running{Style.RESET_ALL}")
             return True
-        print(f"{Fore.RED}✗ API returned status {response.status_code}{Style.RESET_ALL}")
+        print(f"{Fore.RED}Error: API returned status {response.status_code}{Style.RESET_ALL}")
         return False
     except requests.exceptions.RequestException:
-        print(f"{Fore.RED}✗ Cannot connect to API. Is the server running?{Style.RESET_ALL}")
+        print(f"{Fore.RED}Error: Cannot connect to API. Is the server running?{Style.RESET_ALL}")
         print(f"{Fore.YELLOW}  Run: python main.py{Style.RESET_ALL}")
         return False
 
@@ -78,24 +78,20 @@ def start_network_scan() -> bool:
     print(f"{Fore.CYAN}Starting network scan...{Style.RESET_ALL}")
     try:
         response = requests.post(
-    f"{API_BASE}/scan/start",
-    json={},  # 👈 sends an empty JSON object
-    timeout=REQUEST_TIMEOUT
-)
+            f"{API_BASE}/scan/start",
+            json={},  # sends an empty JSON object
+            timeout=REQUEST_TIMEOUT
+        )
         data = safe_parse_json(response) or {}
         if data.get("message"):
-            print(f"{Fore.GREEN}✓ {data['message']}{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}Check: {data['message']}{Style.RESET_ALL}")
 
         # Simulated wait animation (demo)
-        print(f"{Fore.CYAN}Scanning", end="", flush=True)
-        for _ in range(8):
-            time.sleep(0.5)
-            print(".", end="", flush=True)
-        print(f" {Fore.GREEN}Done!{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}Check: Scan started — waiting for results...{Style.RESET_ALL}")
 
         return True
     except Exception as e:
-        print(f"{Fore.RED}✗ Scan failed: {e}{Style.RESET_ALL}")
+        print(f"{Fore.RED}Error: Scan failed: {e}{Style.RESET_ALL}")
         return False
 
 
@@ -112,85 +108,87 @@ def get_scan_status() -> Optional[Dict[str, Any]]:
         print(f"  Protection: {color}{protection_active}{Style.RESET_ALL}")
         return data
     except Exception as e:
-        print(f"{Fore.RED}✗ Failed to get status: {e}{Style.RESET_ALL}")
+        print(f"{Fore.RED}Error: Failed to get status: {e}{Style.RESET_ALL}")
         return None
 
 
+# ==============================================
+# ONLY THIS FUNCTION IS UPDATED
+# ==============================================
 def display_network_risk() -> Optional[Dict[str, Any]]:
-    """Display current network risk assessment"""
-    try:
-        response = requests.get(f"{API_BASE}/networks/current", timeout=REQUEST_TIMEOUT)
-        if response.status_code == 404:
-            print(f"{Fore.YELLOW}⚠ No network connected{Style.RESET_ALL}")
-            return None
+    """Wait for scan to finish, then show risk"""
+    print(f"{Fore.CYAN}Waiting for scan to complete", end="", flush=True)
 
-        network = safe_parse_json(response) or {}
-        # Risk level colors
-        risk_colors = {
-            "CRITICAL": Fore.RED + Style.BRIGHT,
-            "HIGH": Fore.RED + Style.BRIGHT,
-            "MEDIUM": Fore.YELLOW + Style.BRIGHT,
-            "LOW": Fore.BLUE,
-            "SAFE": Fore.GREEN + Style.BRIGHT,
-        }
-
-        risk_level = (network.get("level") or "UNKNOWN").upper()
-        risk_score = int(network.get("score", 0) or 0)
-
-        # Print network info
-        print(f"\n{Fore.CYAN}╔══════════════════════════════════════════════╗")
-        print(f"{Fore.CYAN}║  NETWORK RISK ASSESSMENT                     ║")
-        print(f"{Fore.CYAN}╚══════════════════════════════════════════════╝{Style.RESET_ALL}")
-
-        print(f"\n{Fore.WHITE}Network Information:{Style.RESET_ALL}")
-        print(f"  SSID: {Fore.CYAN}{network.get('ssid', 'Unknown')}{Style.RESET_ALL}")
-        print(f"  BSSID: {network.get('bssid', 'Unknown')}")
-        print(f"  Encryption: {network.get('encryption_type', 'Unknown')}")
-        print(f"  Signal: {network.get('signal_strength', 0)} dBm")
-
-        # Risk score with visual bar (scale 0-100 -> 20 chars)
-        bar_len = max(0, min(20, (risk_score // 5)))
-        score_bar = "█" * bar_len + "░" * (20 - bar_len)
-        color = risk_colors.get(risk_level, Fore.WHITE)
-        print(f"\n{Fore.WHITE}Risk Assessment:{Style.RESET_ALL}")
-        print(f"  Score: {color}{risk_score}/100 {Style.RESET_ALL}[{score_bar}]")
-        print(f"  Level: {color}{risk_level}{Style.RESET_ALL}")
-
-        # Display threats
-        threats = network.get("threats", []) or []
-        if threats:
-            print(f"\n{Fore.RED}⚠ THREATS DETECTED: {len(threats)}{Style.RESET_ALL}")
-            for i, threat in enumerate(threats, 1):
-                sev = threat.get("severity", "UNKNOWN").upper()
-                severity_color = {
-                    "CRITICAL": Fore.RED + Style.BRIGHT,
-                    "HIGH": Fore.RED,
-                    "MEDIUM": Fore.YELLOW,
-                    "LOW": Fore.BLUE,
-                }.get(sev, Fore.WHITE)
-
-                print(f"  {i}. [{severity_color}{sev}{Style.RESET_ALL}] {threat.get('type', 'unknown')}")
-                print(f"     {threat.get('description', '')}")
-        else:
-            print(f"\n{Fore.GREEN}✓ No threats detected{Style.RESET_ALL}")
-
-        # Reasons & recommendations
-        reasons = network.get("reasons", []) or []
-        if reasons:
-            print(f"\n{Fore.WHITE}Risk Factors:{Style.RESET_ALL}")
-            for reason in reasons:
-                print(f"  • {reason}")
-
-        recommendations = network.get("recommendations", []) or []
-        if recommendations:
-            print(f"\n{Fore.YELLOW}Recommendations:{Style.RESET_ALL}")
-            for i, rec in enumerate(recommendations, 1):
-                print(f"  {i}. {rec}")
-
-        return network
-    except Exception as e:
-        print(f"{Fore.RED}✗ Failed to get network info: {e}{Style.RESET_ALL}")
+    for _ in range(30):  # Max 30 seconds
+        try:
+            response = requests.get(f"{API_BASE}/scan/status", timeout=REQUEST_TIMEOUT)
+            data = safe_parse_json(response) or {}
+            
+            if not data.get('scanning') and data.get('current_network'):
+                network = data['current_network']
+                print(f" {Fore.GREEN}Done!{Style.RESET_ALL}")
+                break
+        except:
+            pass
+        print(".", end="", flush=True)
+        time.sleep(1)
+    else:
+        print(f"\n{Fore.YELLOW}Warning: Scan took too long{Style.RESET_ALL}")
         return None
+
+    # === SHOW RESULT ===
+    risk_level = (network.get("level") or "UNKNOWN").upper()
+    risk_score = int(network.get("score", 0) or 0)
+
+    print(f"\n{Fore.CYAN}╔══════════════════════════════════════════════╗")
+    print(f"{Fore.CYAN}║  NETWORK RISK ASSESSMENT                     ║")
+    print(f"{Fore.CYAN}╚══════════════════════════════════════════════╝{Style.RESET_ALL}")
+
+    print(f"\n{Fore.WHITE}Network Information:{Style.RESET_ALL}")
+    print(f"  SSID: {Fore.CYAN}{network.get('ssid', 'Unknown')}{Style.RESET_ALL}")
+    print(f"  BSSID: {network.get('bssid', 'Unknown')}")
+    print(f"  Encryption: {network.get('encryption_type', 'Unknown')}")
+    print(f"  Signal: {network.get('signal_strength', 0)} dBm")
+
+    bar_len = max(0, min(20, (risk_score // 5)))
+    score_bar = "█" * bar_len + "░" * (20 - bar_len)
+    color = {
+        "CRITICAL": Fore.RED + Style.BRIGHT,
+        "HIGH": Fore.RED + Style.BRIGHT,
+        "MEDIUM": Fore.YELLOW + Style.BRIGHT,
+        "LOW": Fore.BLUE,
+        "SAFE": Fore.GREEN + Style.BRIGHT,
+    }.get(risk_level, Fore.WHITE)
+
+    print(f"\n{Fore.WHITE}Risk Assessment:{Style.RESET_ALL}")
+    print(f"  Score: {color}{risk_score}/100 {Style.RESET_ALL}[{score_bar}]")
+    print(f"  Level: {color}{risk_level}{Style.RESET_ALL}")
+
+    threats = network.get("threats", []) or []
+    if threats:
+        print(f"\n{Fore.RED}Warning: THREATS DETECTED: {len(threats)}{Style.RESET_ALL}")
+        for i, t in enumerate(threats, 1):
+            sev = t.get("severity", "UNKNOWN").upper()
+            sev_color = {"CRITICAL": Fore.RED + Style.BRIGHT, "HIGH": Fore.RED, "MEDIUM": Fore.YELLOW, "LOW": Fore.BLUE}.get(sev, Fore.WHITE)
+            print(f"  {i}. [{sev_color}{sev}{Style.RESET_ALL}] {t.get('type')}")
+            print(f"     {t.get('description')}")
+    else:
+        print(f"\n{Fore.GREEN}Check: No threats detected{Style.RESET_ALL}")
+
+    reasons = network.get("reasons", []) or []
+    if reasons:
+        print(f"\n{Fore.WHITE}Risk Factors:{Style.RESET_ALL}")
+        for reason in reasons:
+            print(f"  • {reason}")
+
+    recommendations = network.get("recommendations", []) or []
+    if recommendations:
+        print(f"\n{Fore.YELLOW}Recommendations:{Style.RESET_ALL}")
+        for i, rec in enumerate(recommendations, 1):
+            print(f"  {i}. {rec}")
+
+    return network
+# ==============================================
 
 
 def enable_protection() -> bool:
@@ -200,18 +198,19 @@ def enable_protection() -> bool:
         response = requests.post(
             f"{API_BASE}/protection/enable",
             json={"method": "ssh_proxy"},
+            headers={"Content-Type": "application/json"},
             timeout=REQUEST_TIMEOUT,
         )
         data = safe_parse_json(response) or {}
         if data.get("status") == "protected":
-            print(f"{Fore.GREEN}✓ Protection enabled via {data.get('method', 'unknown')}{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}Check: Protection enabled via {data.get('method', 'unknown')}{Style.RESET_ALL}")
             if data.get("message"):
                 print(f"  {data.get('message')}")
             return True
-        print(f"{Fore.RED}✗ Protection failed{Style.RESET_ALL}")
+        print(f"{Fore.RED}Error: Protection failed{Style.RESET_ALL}")
         return False
     except Exception as e:
-        print(f"{Fore.RED}✗ Failed to enable protection: {e}{Style.RESET_ALL}")
+        print(f"{Fore.RED}Error: Failed to enable protection: {e}{Style.RESET_ALL}")
         return False
 
 
@@ -234,7 +233,7 @@ def get_statistics() -> Optional[Dict[str, Any]]:
 
         return stats
     except Exception as e:
-        print(f"{Fore.RED}✗ Failed to get statistics: {e}{Style.RESET_ALL}")
+        print(f"{Fore.RED}Error: Failed to get statistics: {e}{Style.RESET_ALL}")
         return None
 
 
@@ -256,7 +255,7 @@ def get_recent_threats(limit: int = 5) -> Optional[list]:
 
         return threats
     except Exception as e:
-        print(f"{Fore.RED}✗ Failed to get threats: {e}{Style.RESET_ALL}")
+        print(f"{Fore.RED}Error: Failed to get threats: {e}{Style.RESET_ALL}")
         return None
 
 
@@ -284,7 +283,7 @@ def run_demo() -> None:
     # Step 4: Enable protection if risky
     if network and int(network.get("score", 0) or 0) >= 30:
         print_step(4, "Auto-Protection")
-        print(f"{Fore.YELLOW}⚠ Network risk is {network.get('level', 'UNKNOWN')}. Enabling protection...{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}Warning: Network risk is {network.get('level', 'UNKNOWN')}. Enabling protection...{Style.RESET_ALL}")
         time.sleep(1)
         enable_protection()
         time.sleep(1)

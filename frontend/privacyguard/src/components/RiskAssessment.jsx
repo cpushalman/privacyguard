@@ -17,12 +17,16 @@ const RiskAssessment = () => {
       });
 
       const scanResult = await response.json();
-      console.log("Scan result:", scanResult);
+      console.log("Full scan result:", scanResult);
+      console.log("Current network:", scanResult.current_network);
 
       // Use current_network which has BSSID, encryption, signal, etc
       const network = scanResult.current_network;
 
       if (network && network.ssid) {
+        console.log("Network BSSID:", network.bssid);
+        console.log("Network Signal Strength:", network.signal_strength);
+        console.log("Network Encryption:", network.encryption_type);
         setScanData(network);
 
         // Calculate risk score based on actual data
@@ -455,6 +459,7 @@ const RiskAssessment = () => {
               border: "2px solid #f59e0b",
               padding: "1.5rem",
               borderRadius: "12px",
+              marginBottom: "2rem",
             }}
           >
             <h3 style={{ marginTop: 0, color: "#d97706" }}>
@@ -473,6 +478,41 @@ const RiskAssessment = () => {
                 {rec}
               </div>
             ))}
+          </div>
+
+          {/* Debug Panel - Raw Data */}
+          <div
+            style={{
+              background: "#f0f0f0",
+              border: "2px solid #999",
+              padding: "1rem",
+              borderRadius: "8px",
+              marginTop: "2rem",
+              fontFamily: "monospace",
+              fontSize: "0.75rem",
+              maxHeight: "300px",
+              overflow: "auto",
+            }}
+          >
+            <div
+              style={{
+                fontWeight: "bold",
+                marginBottom: "0.5rem",
+                color: "#333",
+              }}
+            >
+              📊 Raw Data (Debug):
+            </div>
+            <pre
+              style={{
+                margin: 0,
+                color: "#333",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-all",
+              }}
+            >
+              {JSON.stringify(scanData, null, 2)}
+            </pre>
           </div>
         </>
       )}

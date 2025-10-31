@@ -189,14 +189,23 @@ def get_wifi_info(interface: str = None) -> Dict:
         
         elif system == "Windows":
             result = subprocess.run(['netsh', 'wlan', 'show', 'interfaces'],
-                                   capture_output=True, text=True)
+                                   capture_output=True, text=True, encoding='utf-8', errors='replace')
             output = result.stdout
             
             for line in output.split('\n'):
                 if 'SSID' in line and 'BSSID' not in line:
-                    wifi_info['ssid'] = line.split(':')[1].strip()
-                elif 'BSSID' in line:
-                    wifi_info['bssid'] = line.split(':')[1].strip()
+                    parts = line.split(':')
+                    if len(parts) >= 2:
+                        wifi_info['ssid'] = parts[-1].strip()
+                elif 'AP BSSID' in line or 'BSSID' in line:
+                    parts = line.split(':')
+                    if len(parts) >= 3:
+                        # Join all parts after the first colon to get full BSSID (format: "AP BSSID : fa:f1:08:30:3c:8b")
+                        bssid_raw = ':'.join(parts[1:]).strip()
+                        # Extract just the MAC address (remove any trailing text)
+                        bssid_match = re.search(r'([a-fA-F0-9]{2}(?::[a-fA-F0-9]{2}){5})', bssid_raw)
+                        if bssid_match:
+                            wifi_info['bssid'] = bssid_match.group(1)
                 elif 'Signal' in line:
                     signal_match = re.search(r'(\d+)%', line)
                     if signal_match:
@@ -204,13 +213,19 @@ def get_wifi_info(interface: str = None) -> Dict:
                         percent = int(signal_match.group(1))
                         wifi_info['signal_strength'] = -100 + (percent / 2)
                 elif 'Authentication' in line:
-                    auth = line.split(':')[1].strip()
+                    auth = line.split(':')[-1].strip()
                     if 'Open' in auth:
                         wifi_info['encryption_type'] = 'Open'
+                    elif 'WPA3' in auth:
+                        wifi_info['encryption_type'] = 'WPA3'
                     elif 'WPA2' in auth:
                         wifi_info['encryption_type'] = 'WPA2'
                     elif 'WPA' in auth:
                         wifi_info['encryption_type'] = 'WPA'
+                elif 'Channel' in line:
+                    channel_match = re.search(r'(\d+)', line)
+                    if channel_match:
+                        wifi_info['channel'] = int(channel_match.group(1))
     
     except Exception as e:
         print(f"Error getting WiFi info: {e}")

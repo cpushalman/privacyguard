@@ -116,13 +116,70 @@ def health_check():
 
 @app.route('/api/scan/status', methods=['GET'])
 def get_scan_status():
-    """Get current scanning status and network info"""
-    return jsonify({
+    """Return current network + risk + ALL ML features"""
+    response = {
         'scanning': current_scan['scanning'],
-        'current_network': current_scan['current_network'],
         'last_scan': current_scan['last_scan'],
-        'protection_active': current_scan['protection_active']
-    })
+        'protection_active': current_scan['protection_active'],
+        'current_network': None
+    }
+
+    network = current_scan['current_network']
+    if not network:
+        return jsonify(response)
+
+    # Re-calculate risk
+    risk = calculate_risk_score(network)
+
+    # Build ML features from scan result
+    ml_features = {
+        "Signal_Strength_dBm": network.get("signal_strength"),
+        "Encryption_Type": network.get("encryption_type"),
+        "ARP_Anomalies": 1 if network.get("arp_issues") else 0,
+        "TLS_Cert_Validity": network.get("tls_cert_validity", 0),
+        "Captive_Portal": 1 if network.get("captive_portal") else 0,
+        "DNS_Latency_ms": network.get("dns_latency_ms", 0),
+        "Packet_Loss_%": network.get("packet_loss_percent", 0),
+        "Data_Leak_Attempts": network.get("traffic_analysis", {}).get("unencrypted_count", 0)
+    }
+
+    # Threat history
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT threat_type, severity, description, detected_at
+        FROM threats WHERE network_id = ? ORDER BY detected_at DESC LIMIT 10
+    ''', (network.get('db_id'),))
+    threat_rows = cursor.fetchall()
+    conn.close()
+
+    threat_history = [
+        {'type': t[0], 'severity': t[1], 'description': t[2], 'detected_at': t[3]}
+        for t in threat_rows
+    ]
+
+    response['current_network'] = {
+        'db_id': network.get('db_id'),
+        'ssid': network.get('ssid'),
+        'bssid': network.get('bssid'),
+        'encryption_type': network.get('encryption_type'),
+        'signal_strength': network.get('signal_strength'),
+        'channel': network.get('channel'),
+        'interface': network.get('interface'),
+        'scanned_at': network.get('scanned_at'),
+        'captive_portal': network.get('captive_portal'),
+        'traffic_analysis': network.get('traffic_analysis'),
+        'arp_issues': network.get('arp_issues'),
+        'threats': risk['threats'],
+        'threat_history': threat_history,
+        'reasons': risk['reasons'],
+        'score': risk['score'],
+        'level': risk['level'],
+        # === ALL ML FEATURES HERE ===
+        'features': ml_features
+    }
+
+    return jsonify(response)
 
 @app.route('/api/scan/start', methods=['POST'])
 def start_scan():
@@ -149,38 +206,6 @@ def start_scan():
         'interface': interface
     })
 
-@app.route('/api/networks/current', methods=['GET'])
-def get_current_network():
-    """Get detailed info about currently connected network"""
-    if not current_scan['current_network']:
-        return jsonify({'error': 'No network connected'}), 404
-    
-    network = current_scan['current_network']
-    
-    # Get threat history from database
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT threat_type, severity, description, detected_at
-        FROM threats
-        WHERE network_id = ?
-        ORDER BY detected_at DESC
-        LIMIT 10
-    ''', (network.get('db_id'),))
-    threats = cursor.fetchall()
-    conn.close()
-    
-    network['threat_history'] = [
-        {
-            'type': t[0],
-            'severity': t[1],
-            'description': t[2],
-            'detected_at': t[3]
-        }
-        for t in threats
-    ]
-    
-    return jsonify(network)
 
 @app.route('/api/networks/history', methods=['GET'])
 def get_network_history():
@@ -218,6 +243,9 @@ def get_network_history():
 
 @app.route('/api/protection/enable', methods=['POST'])
 def enable_protection():
+    print(f"\n[PROTECTION CALL] from {request.remote_addr}")
+    print(f"  Content-Type: {request.headers.get('Content-Type')}")
+    print(f"  Data: {request.get_data(as_text=True)}")
     """
     Enable VPN/proxy protection
     Expected input: {"method": "wireguard|openvpn|proxy"}

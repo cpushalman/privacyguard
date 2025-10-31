@@ -2,7 +2,10 @@
 Privacy Guard Network Scanner
 Detects network properties, security issues, and calculates risk scores
 """
-
+import time
+import ssl
+import urllib.request
+from datetime import datetime
 import subprocess
 import re
 import platform
@@ -16,6 +19,74 @@ try:
 except ImportError:
     SCAPY_AVAILABLE = False
     print("Warning: Scapy not available. Install with: pip install scapy")
+
+
+def measure_dns_latency(domains=["google.com", "cloudflare.com"]) -> float:
+    """Average DNS resolution time in ms"""
+    times = []
+    for domain in domains:
+        start = time.time()
+        try:
+            socket.gethostbyname(domain)
+            times.append((time.time() - start) * 1000)
+        except:
+            times.append(500)  # timeout penalty
+    return round(sum(times) / len(times), 2) if times else 500.0
+
+def measure_packet_loss(host="8.8.8.8", count=10) -> float:
+    """Ping and return packet loss %"""
+    try:
+        param = "-n" if platform.system() == "Windows" else "-c"
+        result = subprocess.run(
+            ["ping", param, str(count), host],
+            capture_output=True, text=True, timeout=20
+        )
+        if platform.system() == "Windows":
+            lost = result.stdout.count("Request timed out")
+        else:
+            lost = int(re.search(r'(\d+)% packet loss', result.stdout).group(1))
+        return (lost / count) * 100
+    except:
+        return 100.0
+    
+
+
+def check_tls_cert(host="www.google.com", port=443) -> int:
+    """Return 1 if valid cert, 0 otherwise"""
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((host, port), timeout=5) as sock:
+            with context.wrap_socket(sock, server_hostname=host) as ssock:
+                cert = ssock.getpeercert()
+                if not cert:
+                    return 0
+                not_after = cert.get("notAfter")
+                if not_after:
+                    from email.utils import parsedate
+                    expiry = time.mktime(parsedate(not_after))
+                    if expiry < time.time():
+                        return 0
+                return 1
+    except:
+        return 0
+    
+
+def export_features_for_ml(network_data: Dict, risk_data: Dict, label: int = None) -> Dict:
+    """Return ML-ready feature dict"""
+    return {
+        "Signal_Strength_dBm": network_data.get("signal_strength"),
+        "Encryption_Type": network_data.get("encryption_type"),
+        "ARP_Anomalies": 1 if network_data.get("arp_issues") else 0,
+        "TLS_Cert_Validity": check_tls_cert(),
+        "Captive_Portal": 1 if network_data.get("captive_portal") else 0,
+        "DNS_Latency_ms": measure_dns_latency(),
+        "Packet_Loss_%": measure_packet_loss(),
+        "Data_Leak_Attempts": network_data.get("traffic_analysis", {}).get("unencrypted_count", 0),
+        "Is_Suspicious": label if label is not None else 0,
+        "SSID": network_data.get("ssid"),
+        "BSSID": network_data.get("bssid"),
+        "Timestamp": datetime.now().isoformat()
+    }
 
 # Network interface detection
 def get_default_interface() -> str:
@@ -307,12 +378,18 @@ def scan_current_network(interface: str = None) -> Dict:
     
     # ARP spoofing check
     arp_issues = detect_arp_spoofing(wifi_info['interface'], timeout=3)
+    dns_latency = measure_dns_latency()
+    packet_loss = measure_packet_loss()
+    tls_valid = check_tls_cert()
     
     return {
         **wifi_info,
         'captive_portal': has_captive_portal,
         'traffic_analysis': traffic_data,
-        'arp_issues': arp_issues
+        'arp_issues': arp_issues,
+        'dns_latency_ms': dns_latency,
+        'packet_loss_percent': packet_loss,
+        'tls_cert_validity': tls_valid
     }
 
 def calculate_risk_score(network_data: Dict) -> Dict:
@@ -324,6 +401,28 @@ def calculate_risk_score(network_data: Dict) -> Dict:
     reasons = []
     threats = []
     
+
+    if network_data.get('dns_latency_ms', 0) > 200:
+        score += 15
+        reasons.append(f"High DNS latency ({network_data['dns_latency_ms']}ms)")
+    
+    if network_data.get('packet_loss_percent', 0) > 10:
+        score += 20
+        reasons.append(f"High packet loss ({network_data['packet_loss_percent']:.1f}%)")
+        threats.append({
+            'type': 'network_instability',
+            'severity': 'MEDIUM',
+            'description': 'High packet loss may indicate MITM or interference'
+        })
+    
+    if network_data.get('tls_cert_validity') == 0:
+        score += 30
+        reasons.append("Invalid or missing TLS certificate")
+        threats.append({
+            'type': 'invalid_tls',
+            'severity': 'HIGH',
+            'description': 'HTTPS connection failed certificate validation'
+        })
     # Check encryption
     encryption = network_data.get('encryption_type', '').lower()
     if 'open' in encryption or encryption == 'unknown':

@@ -67,14 +67,14 @@ def parse_netsh_output(text):
                 b['signal'] = None
             if 'channel' not in b:
                 b['channel'] = None
-            # attach ssid-level auth/enc if present
-            if 'ssid_auth' in locals():
-                b['authentication'] = ssid_auth
-            else:
+            # attach ssid-level auth/enc if present (fix variable scoping)
+            try:
+                b['authentication'] = ssid_auth if 'ssid_auth' in locals() else None
+            except NameError:
                 b['authentication'] = None
-            if 'ssid_enc' in locals():
-                b['encryption'] = ssid_enc
-            else:
+            try:
+                b['encryption'] = ssid_enc if 'ssid_enc' in locals() else None
+            except NameError:
                 b['encryption'] = None
 
         networks.append({
@@ -92,15 +92,37 @@ def scan_with_netsh():
         # Ensure platform is Windows
         if platform.system().lower() != 'windows':
             return {"error": "netsh-based scanning works only on Windows."}
+        
+        # Use utf-8 encoding and handle errors gracefully
         completed = subprocess.run(
             ["netsh", "wlan", "show", "networks", "mode=bssid"],
-            capture_output=True, text=True, check=True
+            capture_output=True, 
+            text=True, 
+            check=True,
+            encoding='utf-8',
+            errors='replace'  # Replace invalid characters instead of failing
         )
         text = completed.stdout
         networks = parse_netsh_output(text)
         return {"method": "netsh", "networks": networks}
     except subprocess.CalledProcessError as e:
-        return {"error": "netsh command failed", "details": str(e), "stdout": e.stdout, "stderr": e.stderr}
+        return {"error": "netsh command failed", "details": str(e), "stdout": getattr(e, 'stdout', ''), "stderr": getattr(e, 'stderr', '')}
+    except UnicodeDecodeError as e:
+        # Fallback: try with different encodings
+        try:
+            completed = subprocess.run(
+                ["netsh", "wlan", "show", "networks", "mode=bssid"],
+                capture_output=True, 
+                text=True, 
+                check=True,
+                encoding='cp1252',
+                errors='replace'
+            )
+            text = completed.stdout
+            networks = parse_netsh_output(text)
+            return {"method": "netsh", "networks": networks}
+        except Exception as fallback_e:
+            return {"error": "encoding error", "details": f"UTF-8 failed: {str(e)}, CP1252 failed: {str(fallback_e)}"}
     except Exception as e:
         return {"error": "unexpected error", "details": str(e)}
 
@@ -166,10 +188,19 @@ def background_scan():
     global scanning_active
     scan_interval = 3  # seconds between scans
     
+    print("Background scanning thread started")
+    
     while scanning_active:
         try:
             # Perform network scan
+            print("Performing background network scan...")
             result = scan_with_netsh()
+            
+            # Log the scan result for debugging
+            if 'error' in result:
+                print(f"Scan error: {result['error']}")
+            else:
+                print(f"Scan successful: found {len(result.get('networks', []))} networks")
             
             # Emit results to all connected clients
             socketio.emit('network_update', {
@@ -181,11 +212,14 @@ def background_scan():
             time.sleep(scan_interval)
             
         except Exception as e:
+            print(f"Background scan exception: {str(e)}")
             socketio.emit('scan_error', {
                 'timestamp': time.time(),
                 'error': str(e)
             }, namespace='/scan')
             time.sleep(scan_interval)
+    
+    print("Background scanning thread stopped")
 
 def start_scanning():
     """Start the background scanning thread"""
